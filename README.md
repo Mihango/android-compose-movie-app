@@ -1,1 +1,3 @@
-"# android-compose-movie-app" 
+"# Compose Movie app " 
+
+By @intelligibabble on Dogfooding movie app
