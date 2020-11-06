@@ -17,22 +17,17 @@ class MainActivity : AppCompatActivity() {
             MovieComposeTheme {
                 // A surface container using the 'background' color from the theme
                 Surface(color = MaterialTheme.colors.background) {
-                    Greeting("Android")
+                    Screen()
                 }
             }
         }
     }
 }
 
-@Composable
-fun Greeting(name: String) {
-    Text(text = "Hello $name!")
-}
-
 @Preview(showBackground = true)
 @Composable
 fun DefaultPreview() {
     MovieComposeTheme {
-        Greeting("Android")
+        Screen()
     }
 }
