@@ -1,11 +1,15 @@
 package labs.khobfa.movie
 
 import android.widget.Toast
+import androidx.compose.animation.asDisposableClock
+import androidx.compose.animation.core.TargetAnimation
 import androidx.compose.foundation.Icon
 import androidx.compose.foundation.Text
+import androidx.compose.foundation.animation.FlingConfig
+import androidx.compose.foundation.animation.defaultFlingConfig
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.rememberScrollableController
+import androidx.compose.foundation.gestures.ScrollableController
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,23 +19,20 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.*
 import androidx.compose.ui.*
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawOpacity
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.lerp
 import androidx.compose.ui.gesture.scrollorientationlocking.Orientation
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorStop
-import androidx.compose.ui.graphics.VerticalGradient
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.*
+import androidx.compose.ui.platform.AnimationClockAmbient
+import androidx.compose.ui.platform.ConfigurationAmbient
+import androidx.compose.ui.platform.ContextAmbient
+import androidx.compose.ui.platform.DensityAmbient
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.Constraints
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.*
 import dev.chrisbanes.accompanist.coil.CoilImage
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 data class Movie(
@@ -130,12 +131,39 @@ fun Screen() {
     val screenHeightPx = with(density) { screenHeight.toPx() }
 
     var offset by remember { mutableStateOf(0f) }
-    val scrollController = rememberScrollableController { delta ->
-        offset += delta
-        delta
-    }
 
-    val indexFraction = -1 * offset / screenWidthPx
+    val posterWidthDp = screenWidth * 0.6f
+    val posterSpacingPx = with(density) { posterWidthDp.toPx() + 50.dp.toPx() }
+    val indexFraction = -1 * offset / posterSpacingPx
+
+
+    val flingConfig =
+        defaultFlingConfig { TargetAnimation((it / posterSpacingPx).roundToInt() * posterSpacingPx) }
+
+    val upperBound = 0f
+    val lowerBound = -1f * (movies.size - 1) * posterSpacingPx
+
+    val scrollController = rememberScrollableController(flingConfig) { delta ->
+        val target = offset + delta
+        when {
+            target > upperBound -> {
+                val consumed = upperBound - offset
+                offset = upperBound
+                consumed
+            }
+
+            target < lowerBound -> {
+                val consumed = lowerBound - offset
+                offset = lowerBound
+                consumed
+            }
+
+            else -> {
+                offset = target
+                delta
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -147,11 +175,29 @@ fun Screen() {
             )
     ) {
         movies.forEachIndexed { index, movie ->
-            val opacity = if (indexFraction.roundToInt() == index) 1f else 0f
+
+            val isInRange = (index >= indexFraction - 1 && indexFraction + 1 > index)
+            val opacity = if (isInRange) 1f else 0f
+            val shape = when {
+                !isInRange -> RectangleShape
+                index < indexFraction -> {
+                    val fraction = indexFraction - index
+                    FractionalRectangleShape(fraction, 1f)
+                }
+                else -> {
+                    val fraction = indexFraction - index + 1
+                    FractionalRectangleShape(0f, max(fraction, Float.MIN_VALUE))
+                }
+            }
             CoilImage(
                 data = movie.bgUrl,
                 modifier = Modifier
-                    .drawOpacity(opacity)
+                    // .drawOpacity(opacity)
+                    .drawLayer(
+                        alpha = opacity,
+                        shape = shape,
+                        clip = true
+                    )
                     .fillMaxWidth()
                     .aspectRatio(posterAspectRatio)
             )
@@ -159,26 +205,53 @@ fun Screen() {
 
         Spacer(
             modifier = Modifier
-                .align(alignment = Alignment.BottomEnd)
+                .align(Alignment.BottomEnd)
                 .verticalGradient(0f to Color.Transparent, 0.3f to Color.White, 1f to Color.White)
                 .fillMaxWidth()
                 .fillMaxHeight(0.6f)
         )
 
         movies.forEachIndexed { index, movie ->
-            val center = screenWidthPx * index
-            val distFromCenter = abs(center - offset) / screenWidthPx
+            val center = posterSpacingPx * index
+            val distFromCenter = abs(center + offset) / screenWidthPx
             MoviePoster(
                 index = index,
                 screenSize = screenWidth,
                 movie = movie,
                 modifier = Modifier
-                    .offset(getX = { center + offset }, getY = { 0f })
-                    .width(screenWidth * .75f)
+                    .offset(getX = { center + offset }, getY = { lerp(0f, 50f, distFromCenter) })
+                    .width(posterWidthDp)
                     .align(Alignment.BottomCenter)
             )
         }
     }
+}
+
+@Composable
+fun rememberScrollableController(
+    flingConfig: FlingConfig = defaultFlingConfig(),
+    consumeScrollDelta: (Float) -> Float
+): ScrollableController {
+    val clocks = AnimationClockAmbient.current.asDisposableClock()
+    return remember(clocks, flingConfig) {
+        ScrollableController(consumeScrollDelta, flingConfig, clocks)
+    }
+}
+
+fun FractionalRectangleShape(startFraction: Float, endFraction: Float) = object : Shape {
+    override fun createOutline(size: Size, density: Density): Outline =
+        Outline.Rectangle(
+            Rect(
+                top = 0f,
+                left = startFraction * size.width,
+                bottom = size.height,
+                right = endFraction * size.width
+            )
+        )
+}
+
+fun lerp(start: Float, stop: Float, fraction: Float): Float {
+    return (1 - fraction) * start + fraction * stop
 }
 
 @Composable
@@ -247,9 +320,10 @@ fun StarRating(value: Float) {
 fun BuyTicket(onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(0.5f),
+        modifier = Modifier
+            .fillMaxWidth(0.5f),
         backgroundColor = Color.DarkGray,
-        elevation = 0.dp
+        elevation = 2.dp
     ) {
         Text(
             text = "Buy Ticket",
@@ -279,7 +353,7 @@ fun Modifier.offset(
 }
 
 fun Modifier.verticalGradient(vararg colors: ColorStop) =
-    this then object : DrawModifier, InspectableParameter {
+    this then object : DrawModifier {
 
         // naive cache outline calculation if size is the same
         private var lastSize: Size? = null
@@ -302,17 +376,7 @@ fun Modifier.verticalGradient(vararg colors: ColorStop) =
                 lastBrush = brush
             }
 
-            brush?.let { drawRect(brush = brush, alpha = 1f) }
+            brush.let { drawRect(brush = brush, alpha = 1f) }
         }
-
-        override val nameFallback = "verticalGradient"
-
-        override val valueOverride: Any?
-            get() = colors
-
-        override val inspectableElements: Sequence<ParameterElement>
-            get() = sequenceOf(
-                ParameterElement("color", colors)
-            )
     }
 
