@@ -1,10 +1,9 @@
 package labs.khobfa.movie
 
-import android.widget.Toast
+import android.util.Log
+import androidx.compose.animation.animatedFloat
 import androidx.compose.animation.asDisposableClock
 import androidx.compose.animation.core.TargetAnimation
-import androidx.compose.foundation.Icon
-import androidx.compose.foundation.Text
 import androidx.compose.foundation.animation.FlingConfig
 import androidx.compose.foundation.animation.defaultFlingConfig
 import androidx.compose.foundation.background
@@ -14,6 +13,9 @@ import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.Button
+import androidx.compose.material.ButtonConstants
+import androidx.compose.material.Icon
+import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.*
@@ -23,16 +25,16 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.gesture.scrollorientationlocking.Orientation
 import androidx.compose.ui.graphics.*
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.*
 import androidx.compose.ui.platform.AnimationClockAmbient
 import androidx.compose.ui.platform.ConfigurationAmbient
-import androidx.compose.ui.platform.ContextAmbient
 import androidx.compose.ui.platform.DensityAmbient
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.*
 import dev.chrisbanes.accompanist.coil.CoilImage
 import kotlin.math.abs
-import kotlin.math.max
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlin.math.roundToInt
 
 data class Movie(
@@ -124,42 +126,86 @@ val posterAspectRatio = .674f
 @Composable
 fun Screen() {
     val configuration = ConfigurationAmbient.current
-    val density = DensityAmbient.current
     val screenWidth = configuration.screenWidthDp.dp
-    val screenWidthPx = with(density) { screenWidth.toPx() }
-    val screenHeight = configuration.screenHeightDp.dp
-    val screenHeightPx = with(density) { screenHeight.toPx() }
-
-    var offset by remember { mutableStateOf(0f) }
-
     val posterWidthDp = screenWidth * 0.6f
-    val posterSpacingPx = with(density) { posterWidthDp.toPx() + 50.dp.toPx() }
-    val indexFraction = -1 * offset / posterSpacingPx
+    val posterSpacing = posterWidthDp + 20.dp
+
+    var currentMovie by remember { mutableStateOf(0) }
 
 
-    val flingConfig =
-        defaultFlingConfig { TargetAnimation((it / posterSpacingPx).roundToInt() * posterSpacingPx) }
+    Box {
+        Carousel(
+            movies,
+            selectedIndex = currentMovie,
+            spacing = posterSpacing,
+            backgroundContent = { _, movie ->
+                CoilImage(
+                    data = movie.bgUrl,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(posterAspectRatio)
+                )
+            },
+            foregroundContent = { _, movie ->
+                MoviePoster(
+                    movie = movie,
+                    modifier = Modifier.width(posterWidthDp)
+                )
+            },
+            onSelectedIndexChange = { index -> currentMovie = index }
+        )
+
+        BuyTicket(
+            onClick = {
+                Log.e("Current Movie", "is >>>>> $currentMovie")
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .width(posterWidthDp)
+                .padding(20.dp)
+        )
+    }
+}
+
+@Composable
+fun <T> Carousel(
+    items: List<T>,
+    selectedIndex: Int,
+    onSelectedIndexChange: (Int) -> Unit,
+    spacing: Dp,
+    backgroundContent: @Composable (Int, T) -> Unit,
+    foregroundContent: @Composable (Int, T) -> Unit,
+) {
+    val animatedOffset = animatedFloat(initVal = 0f)
+    val spacingPx = with(DensityAmbient.current) { spacing.toPx() }
+    val flingConfig = defaultFlingConfig {
+        Log.e("Details", "It >>> $it >>>> spacingPx: $spacing")
+        TargetAnimation((it / spacingPx).roundToInt() * spacingPx)
+    }
 
     val upperBound = 0f
-    val lowerBound = -1f * (movies.size - 1) * posterSpacingPx
+    val lowerBound = -1f * (movies.size - 1) * spacingPx
 
     val scrollController = rememberScrollableController(flingConfig) { delta ->
-        val target = offset + delta
+        val target = animatedOffset.value + delta
         when {
             target > upperBound -> {
-                val consumed = upperBound - offset
-                offset = upperBound
+                val consumed = upperBound - animatedOffset.value
+                animatedOffset.snapTo(upperBound)
+//                offset = upperBound
                 consumed
             }
 
             target < lowerBound -> {
-                val consumed = lowerBound - offset
-                offset = lowerBound
+                val consumed = lowerBound - animatedOffset.value
+//                offset = lowerBound
+                animatedOffset.snapTo(lowerBound)
                 consumed
             }
 
             else -> {
-                offset = target
+//                offset = target
+                animatedOffset.snapTo(target)
                 delta
             }
         }
@@ -174,33 +220,17 @@ fun Screen() {
                 controller = scrollController
             )
     ) {
-        movies.forEachIndexed { index, movie ->
-
-            val isInRange = (index >= indexFraction - 1 && indexFraction + 1 > index)
-            val opacity = if (isInRange) 1f else 0f
-            val shape = when {
-                !isInRange -> RectangleShape
-                index < indexFraction -> {
-                    val fraction = indexFraction - index
-                    FractionalRectangleShape(fraction, 1f)
-                }
-                else -> {
-                    val fraction = indexFraction - index + 1
-                    FractionalRectangleShape(0f, max(fraction, Float.MIN_VALUE))
-                }
-            }
-            CoilImage(
-                data = movie.bgUrl,
+        items.forEachIndexed { index, item ->
+            Column(
                 modifier = Modifier
-                    // .drawOpacity(opacity)
-                    .drawLayer(
-                        alpha = opacity,
-                        shape = shape,
-                        clip = true
-                    )
-                    .fillMaxWidth()
-                    .aspectRatio(posterAspectRatio)
-            )
+                    .carouselBaclground(index) {
+                        -1 * animatedOffset.value / spacingPx
+                    }
+                    .fillMaxSize()
+            ) {
+                backgroundContent(index, item)
+            }
+            //onSelectedIndexChange(index)
         }
 
         Spacer(
@@ -211,18 +241,26 @@ fun Screen() {
                 .fillMaxHeight(0.6f)
         )
 
-        movies.forEachIndexed { index, movie ->
-            val center = posterSpacingPx * index
-            val distFromCenter = abs(center + offset) / screenWidthPx
-            MoviePoster(
-                index = index,
-                screenSize = screenWidth,
-                movie = movie,
-                modifier = Modifier
-                    .offset(getX = { center + offset }, getY = { lerp(0f, 50f, distFromCenter) })
-                    .width(posterWidthDp)
+
+
+        items.forEachIndexed { index, item ->
+            val center = spacingPx * index
+            Column(
+                Modifier
+                    .offset(
+                        getX = {
+                            center + animatedOffset.value
+                        },
+                        getY = {
+                            val distFromCenter = abs(animatedOffset.value + center) / spacingPx
+                            lerp(0f, 50f, distFromCenter)
+                        }
+                    )
                     .align(Alignment.BottomCenter)
-            )
+            ) {
+                foregroundContent(index, item)
+            }
+
         }
     }
 }
@@ -255,26 +293,32 @@ fun lerp(start: Float, stop: Float, fraction: Float): Float {
 }
 
 @Composable
-fun MoviePoster(index: Int, screenSize: Dp, movie: Movie, modifier: Modifier = Modifier) {
-    val context = ContextAmbient.current
+fun MoviePoster(
+    movie: Movie,
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier
-            .width(screenSize * 0.7f)
             .clip(RoundedCornerShape(20.dp))
             .background(Color.White)
-            .padding(20.dp),
+            .padding(20.dp)
+            .padding(bottom = 60.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         CoilImage(
             data = movie.posterUrl,
             contentScale = ContentScale.Crop,
-            modifier = modifier
-                .width(screenSize * 0.6f)
+            modifier = Modifier
+                .fillMaxWidth()
                 .aspectRatio(posterAspectRatio)
                 .clip(RoundedCornerShape(10.dp))
         )
 
-        Text(text = movie.title, style = TextStyle(color = Color.Black, fontSize = 24.sp))
+        Text(
+            text = movie.title,
+            color = Color.Black,
+            fontSize = 24.sp
+        )
 
         Row {
             for (chip in movie.chips) {
@@ -285,10 +329,44 @@ fun MoviePoster(index: Int, screenSize: Dp, movie: Movie, modifier: Modifier = M
         Spacer(modifier = Modifier.height(8.dp))
         StarRating(9.0f)
         Spacer(modifier = Modifier.height(8.dp))
-        BuyTicket(onClick = {
-            Toast.makeText(context, "Index >> $index", Toast.LENGTH_LONG).show()
-        })
     }
+}
+
+fun Modifier.carouselBaclground(
+    index: Int,
+    getIndexFraction: () -> Float
+) = this then object : DrawLayerModifier {
+
+    override val alpha: Float
+        get() {
+            val indexFraction = getIndexFraction()
+            val leftIndex = floor(indexFraction).toInt()
+            val rightIndex = ceil(indexFraction).toInt()
+            return if (index == leftIndex || index == rightIndex) 1f else 0f
+        }
+
+    override val shape: Shape
+        get() {
+//            val indexFraction = -1 * offset / spacingPx
+            val indexFraction = getIndexFraction()
+            val leftIndex = floor(indexFraction).toInt()
+            val rightIndex = ceil(indexFraction).toInt()
+            return when (index) {
+                leftIndex -> {
+                    val fraction = indexFraction - index
+                    FractionalRectangleShape(fraction, 1f)
+                }
+                rightIndex -> {
+                    val fraction = indexFraction - index + 1
+                    FractionalRectangleShape(0f, fraction)
+                }
+                else -> RectangleShape
+            }
+
+        }
+    override val clip: Boolean
+        get() = super.clip
+
 }
 
 @Composable
@@ -313,21 +391,22 @@ fun StarRating(value: Float) {
         for (i in 1..5) {
             Icon(Icons.Default.Star)
         }
+
     }
 }
 
 @Composable
-fun BuyTicket(onClick: () -> Unit) {
+fun BuyTicket(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Button(
         onClick = onClick,
-        modifier = Modifier
-            .fillMaxWidth(0.5f),
-        backgroundColor = Color.DarkGray,
-        elevation = 2.dp
+        modifier = modifier
+            .padding(vertical = 16.dp),
+        colors = ButtonConstants.defaultButtonColors(backgroundColor = Color.DarkGray)
     ) {
         Text(
-            text = "Buy Ticket",
-            color = Color.White
+            "BUY TICKET",
+            Modifier,
+            Color.White,
         )
     }
 }
@@ -340,7 +419,7 @@ fun Modifier.offset(
     override fun MeasureScope.measure(
         measurable: Measurable,
         constraints: Constraints
-    ): MeasureScope.MeasureResult {
+    ): MeasureResult {
         val placeable = measurable.measure(constraints)
         return layout(placeable.width, placeable.height) {
             if (rtlAware) {
@@ -364,6 +443,7 @@ fun Modifier.verticalGradient(vararg colors: ColorStop) =
             drawContent()
         }
 
+
         private fun ContentDrawScope.drawRect() {
             var brush = lastBrush
             if (size != lastSize || brush == null) {
@@ -375,8 +455,7 @@ fun Modifier.verticalGradient(vararg colors: ColorStop) =
                 lastSize = size
                 lastBrush = brush
             }
-
-            brush.let { drawRect(brush = brush, alpha = 1f) }
+            drawRect(brush = brush, alpha = 1f)
         }
     }
 
